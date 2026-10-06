@@ -4,6 +4,7 @@ import threading
 import uuid
 from io import BytesIO
 from pathlib import Path
+import openai
 from flask import (
     Flask,
     Response,
@@ -19,6 +20,7 @@ from pypdf import PdfReader
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
 # 간단한 단일 서버용 메모리 작업 저장소입니다.
+# 사용자가 입력한 API 키는 여기에 절대 저장하지 않습니다(번역 스레드 인자로만 전달).
 jobs: dict[str, dict] = {}
 jobs_lock = threading.Lock()
 LANGUAGES = {
@@ -74,18 +76,82 @@ def finish_job(job_id: str, event_type: str, **data) -> None:
             job["condition"].notify_all()
 
 
-def translate_job(job_id: str, chunks: list[str], direction: str) -> None:
+def describe_error(exc: Exception, model: str) -> tuple[str, str]:
+    """OpenAI 예외를 사용자가 이해할 수 있는 (코드, 메시지)로 바꿉니다.
+
+    API 키가 화면이나 작업 기록에 섞여 나가지 않도록 예외 원문은 노출하지 않습니다.
+    """
+    if isinstance(exc, openai.AuthenticationError):
+        return (
+            "invalid_api_key",
+            "OpenAI API 키가 올바르지 않습니다. 키를 다시 확인한 뒤 입력해 주세요.",
+        )
+    if isinstance(exc, openai.PermissionDeniedError):
+        return (
+            "permission_denied",
+            f"이 API 키로는 '{model}' 모델을 사용할 권한이 없습니다. "
+            "OpenAI 계정의 모델 접근 권한을 확인해 주세요.",
+        )
+    if isinstance(exc, openai.RateLimitError):
+        detail = f"{getattr(exc, 'code', '')} {getattr(exc, 'type', '')} {exc}"
+        if "insufficient_quota" in detail:
+            return (
+                "insufficient_quota",
+                "API 사용 한도 또는 잔액이 부족합니다. "
+                "OpenAI 계정의 결제 정보와 사용량을 확인해 주세요.",
+            )
+        return (
+            "rate_limit",
+            "요청이 너무 많아 OpenAI가 잠시 제한했습니다. 잠시 후 다시 시도해 주세요.",
+        )
+    if isinstance(exc, openai.NotFoundError):
+        return (
+            "model_not_found",
+            f"'{model}' 모델을 찾을 수 없습니다. OPENAI_MODEL 환경 변수 값을 확인해 주세요.",
+        )
+    if isinstance(exc, openai.BadRequestError):
+        return (
+            "bad_request",
+            "OpenAI가 요청을 거부했습니다. 문서가 너무 길거나 모델이 처리할 수 없는 내용일 수 있습니다.",
+        )
+    if isinstance(exc, openai.APITimeoutError):
+        return (
+            "timeout",
+            "OpenAI 응답이 제한 시간을 초과했습니다. 잠시 후 다시 시도해 주세요.",
+        )
+    if isinstance(exc, openai.APIConnectionError):
+        return (
+            "connection",
+            "OpenAI 서버에 연결할 수 없습니다. 인터넷 연결을 확인한 뒤 다시 시도해 주세요.",
+        )
+    if isinstance(exc, openai.InternalServerError):
+        return (
+            "server_error",
+            "OpenAI 서버에 일시적인 문제가 있습니다. 잠시 후 다시 시도해 주세요.",
+        )
+    if isinstance(exc, openai.APIStatusError):
+        return (
+            "api_error",
+            f"OpenAI API 오류가 발생했습니다. (HTTP {exc.status_code})",
+        )
+    return (
+        "unexpected",
+        f"번역 중 예상하지 못한 오류가 발생했습니다. ({type(exc).__name__})",
+    )
+
+
+def translate_job(job_id: str, chunks: list[str], direction: str, api_key: str) -> None:
+    """사용자가 입력한 API 키로 번역합니다. 키는 이 함수가 실행되는 동안만 메모리에 둡니다."""
     source_language, target_language = LANGUAGES[direction]
+    model = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+    client = None
     try:
-        api_key = os.environ.get("OPENAI_API_KEY")
-        if not api_key:
-            raise RuntimeError("OPENAI_API_KEY 환경 변수가 설정되지 않았습니다.")
         client = OpenAI(api_key=api_key)
         translated_parts = []
         total = len(chunks)
         for index, chunk in enumerate(chunks, start=1):
             response = client.chat.completions.create(
-                model=os.environ.get("OPENAI_MODEL", "gpt-4o-mini"),
+                model=model,
                 messages=[
                     {
                         "role": "system",
@@ -111,7 +177,13 @@ def translate_job(job_id: str, chunks: list[str], direction: str) -> None:
         result = "\n\n".join(translated_parts)
         finish_job(job_id, "complete", progress=100, result=result)
     except Exception as exc:
-        finish_job(job_id, "error", message=str(exc))
+        code, message = describe_error(exc, model)
+        finish_job(job_id, "error", code=code, message=message)
+    finally:
+        # 번역이 끝나면 키와 HTTP 클라이언트 참조를 즉시 해제합니다.
+        if client is not None:
+            client.close()
+        del client, api_key
 
 
 @app.get("/")
@@ -123,6 +195,28 @@ def index():
 def start_translation():
     pdf_file = request.files.get("pdf")
     direction = request.form.get("direction", "en-ko")
+    # API 키는 URL이 아닌 multipart 요청 본문으로만 받습니다.
+    api_key = (request.form.get("api_key") or "").strip()
+    if not api_key:
+        return (
+            jsonify(
+                {
+                    "error": "OpenAI API 키를 입력해 주세요. 키가 없으면 번역을 시작할 수 없습니다.",
+                    "field": "api_key",
+                }
+            ),
+            400,
+        )
+    if any(character.isspace() for character in api_key):
+        return (
+            jsonify(
+                {
+                    "error": "API 키에 공백이나 줄바꿈이 포함되어 있습니다. 키를 다시 복사해 입력해 주세요.",
+                    "field": "api_key",
+                }
+            ),
+            400,
+        )
     if not pdf_file or not pdf_file.filename:
         return jsonify({"error": "PDF 파일을 선택해 주세요."}), 400
     if direction not in LANGUAGES:
@@ -172,7 +266,7 @@ def start_translation():
         }
     threading.Thread(
         target=translate_job,
-        args=(job_id, chunks, direction),
+        args=(job_id, chunks, direction, api_key),
         daemon=True,
     ).start()
     return jsonify({"job_id": job_id, "extracted_text": extracted_text})

@@ -1,0 +1,2 @@
+# Windows 배치 파일은 어떤 운영체제에서 받아도 CRLF로 체크아웃되게 합니다.
+*.bat text eol=crlf

@@ -7,18 +7,111 @@
 :root{color-scheme:light dark;--bg:#f4f5f7;--panel:#fff;--surface:#f8f9fb;--text:#17191c;--muted:#667085;--border:#dfe3e8;--accent:#10a37f;--danger:#d92d20;--shadow:0 10px 32px #10182814}
 @media(prefers-color-scheme:dark){:root{--bg:#171717;--panel:#212121;--surface:#2b2b2b;--text:#f5f5f5;--muted:#b4b4b4;--border:#404040;--accent:#19c39c;--danger:#ff7b72;--shadow:none}}
 *{box-sizing:border-box}body{margin:0;min-height:100vh;background:var(--bg);color:var(--text);font-family:Inter,Pretendard,"Noto Sans KR",system-ui,sans-serif}.app{display:grid;grid-template-columns:minmax(280px,360px) minmax(0,1fr);gap:20px;width:min(1440px,100%);min-height:100vh;margin:auto;padding:24px}.panel{min-width:0;background:var(--panel);border:1px solid var(--border);border-radius:16px;box-shadow:var(--shadow)}.controls{align-self:start;position:sticky;top:24px;padding:28px}h1{margin:0 0 8px;font-size:1.65rem}h2{margin:0;font-size:1rem}.description{margin:0 0 28px;color:var(--muted);line-height:1.55;font-size:.92rem}.field{margin-bottom:22px}.field>label,.label{display:block;margin-bottom:9px;font-size:.9rem;font-weight:700}input[type=file]{width:100%;padding:12px;color:var(--text);background:var(--surface);border:1px dashed var(--border);border-radius:10px}input[type=file]::file-selector-button{margin-right:10px;padding:8px 12px;color:#fff;background:#555;border:0;border-radius:7px;cursor:pointer}.directions{display:grid;gap:8px}.radio-option{display:flex;gap:10px;align-items:center;padding:11px 12px;background:var(--surface);border:1px solid var(--border);border-radius:9px;cursor:pointer}input[type=radio]{accent-color:var(--accent)}button,.download{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:0 18px;color:#fff;background:var(--accent);border:0;border-radius:9px;font:inherit;font-weight:700;text-decoration:none;cursor:pointer}button{width:100%}button:disabled,.download.disabled{opacity:.45;pointer-events:none}.progress-wrap{margin-top:24px}.progress-meta{display:flex;justify-content:space-between;margin-bottom:8px;color:var(--muted);font-size:.85rem}.progress-track{height:9px;overflow:hidden;background:var(--surface);border:1px solid var(--border);border-radius:99px}.progress-bar{width:0;height:100%;background:var(--accent);transition:width .25s}.status{min-height:42px;margin:12px 0 0;color:var(--muted);font-size:.84rem}.status.error{color:var(--danger)}.result-panel{display:grid;grid-template-rows:1fr 1fr;min-height:calc(100vh - 48px);overflow:hidden}.viewer{display:grid;grid-template-rows:auto minmax(180px,1fr);min-height:0;padding:22px}.viewer+.viewer{border-top:1px solid var(--border)}.viewer-header{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:12px}.content{width:100%;height:100%;resize:none;padding:16px;overflow:auto;color:var(--text);background:var(--surface);border:1px solid var(--border);border-radius:10px;font:.92rem/1.65 ui-monospace,Consolas,monospace}.download{min-height:36px;padding:0 14px;font-size:.85rem}@media(max-width:850px){.app{grid-template-columns:1fr;padding:12px}.controls{position:static}.result-panel{min-height:900px}}
+.key-wrap{display:flex;gap:8px}
+.key-wrap input{flex:1;min-width:0;padding:11px 12px;color:var(--text);background:var(--surface);border:1px solid var(--border);border-radius:9px;font:inherit}
+.key-wrap input:focus,.key-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.key-wrap input[aria-invalid=true]{border-color:var(--danger)}
+.key-toggle{width:auto;min-height:0;padding:0 12px;color:var(--text);background:var(--surface);border:1px solid var(--border);font-size:.8rem;font-weight:600;white-space:nowrap}
+.help{margin:8px 0 0;color:var(--muted);font-size:.8rem;line-height:1.5}
 </style>
 </head>
 <body><main class="app">
 <section class="panel controls"><h1>PDF 번역기</h1><p class="description">PDF의 텍스트를 추출하고 OpenAI를 이용해 실시간으로 번역합니다.</p>
-<form id="translateForm"><div class="field"><label for="pdf">PDF 파일</label><input id="pdf" name="pdf" type="file" accept=".pdf,application/pdf" required></div>
+<form id="translateForm" novalidate>
+<div class="field">
+  <label for="apiKey">OpenAI API 키</label>
+  <div class="key-wrap">
+    <input id="apiKey" name="api_key" type="password" placeholder="sk-..." autocomplete="off" autocapitalize="off" spellcheck="false" aria-describedby="apiKeyHelp" data-lpignore="true" data-1p-ignore>
+    <button id="toggleKey" class="key-toggle" type="button" aria-controls="apiKey" aria-pressed="false">보기</button>
+  </div>
+  <p id="apiKeyHelp" class="help">본인의 OpenAI API 키를 입력하세요. API 사용료는 해당 키의 계정에 청구됩니다.</p>
+</div>
+<div class="field"><label for="pdf">PDF 파일</label><input id="pdf" name="pdf" type="file" accept=".pdf,application/pdf" required></div>
 <fieldset class="field" style="border:0;padding:0;margin-inline:0"><legend class="label">번역 방향</legend><div class="directions"><label class="radio-option"><input type="radio" name="direction" value="en-ko" checked> 영어 → 한국어</label><label class="radio-option"><input type="radio" name="direction" value="ko-en"> 한국어 → 영어</label></div></fieldset><button id="startButton" type="submit">번역 시작</button></form>
 <div class="progress-wrap"><div class="progress-meta"><span>진행률</span><strong id="progressText">0%</strong></div><div class="progress-track" role="progressbar" aria-label="번역 진행률" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div id="progressBar" class="progress-bar"></div></div><p id="status" class="status">PDF 파일을 선택해 주세요.</p></div></section>
 <section class="panel result-panel"><div class="viewer"><div class="viewer-header"><h2>PDF에서 추출한 텍스트</h2></div><textarea id="sourceText" class="content" readonly placeholder="추출된 텍스트가 여기에 표시됩니다."></textarea></div><div class="viewer"><div class="viewer-header"><h2>번역된 내용</h2><a id="downloadButton" class="download disabled" href="#" aria-disabled="true">TXT 다운로드</a></div><textarea id="translatedText" class="content" readonly placeholder="번역 결과가 실시간으로 표시됩니다."></textarea></div></section>
 </main><script>
-const form=document.querySelector('#translateForm'),startButton=document.querySelector('#startButton'),progressBar=document.querySelector('#progressBar'),progressTrack=document.querySelector('.progress-track'),progressText=document.querySelector('#progressText'),statusElement=document.querySelector('#status'),sourceText=document.querySelector('#sourceText'),translatedText=document.querySelector('#translatedText'),downloadButton=document.querySelector('#downloadButton');let eventSource=null;
+const form=document.querySelector('#translateForm'),startButton=document.querySelector('#startButton'),progressBar=document.querySelector('#progressBar'),progressTrack=document.querySelector('.progress-track'),progressText=document.querySelector('#progressText'),statusElement=document.querySelector('#status'),sourceText=document.querySelector('#sourceText'),translatedText=document.querySelector('#translatedText'),downloadButton=document.querySelector('#downloadButton'),apiKeyInput=document.querySelector('#apiKey'),toggleKeyButton=document.querySelector('#toggleKey'),pdfInput=document.querySelector('#pdf');let eventSource=null;
 function setProgress(value){const p=Math.max(0,Math.min(100,value));progressBar.style.width=`${p}%`;progressText.textContent=`${p}%`;progressTrack.setAttribute('aria-valuenow',p)}
 function setStatus(message,isError=false){statusElement.textContent=message;statusElement.classList.toggle('error',isError)}
 function resetView(){if(eventSource)eventSource.close();eventSource=null;setProgress(0);sourceText.value='';translatedText.value='';downloadButton.href='#';downloadButton.classList.add('disabled');downloadButton.setAttribute('aria-disabled','true')}
-form.addEventListener('submit',async(event)=>{event.preventDefault();resetView();startButton.disabled=true;setStatus('PDF에서 텍스트를 추출하는 중입니다...');try{const response=await fetch('/start',{method:'POST',body:new FormData(form)}),data=await response.json();if(!response.ok)throw new Error(data.error||'작업을 시작하지 못했습니다.');sourceText.value=data.extracted_text;setStatus('번역을 진행하고 있습니다...');eventSource=new EventSource(`/events/${data.job_id}`);eventSource.addEventListener('progress',(event)=>{const payload=JSON.parse(event.data);translatedText.value+=payload.text;translatedText.scrollTop=translatedText.scrollHeight;setProgress(payload.progress);setStatus(`번역 중... ${payload.progress}%`)});eventSource.addEventListener('complete',()=>{setProgress(100);setStatus('번역이 완료되었습니다.');downloadButton.href=`/download/${data.job_id}`;downloadButton.classList.remove('disabled');downloadButton.removeAttribute('aria-disabled');startButton.disabled=false;eventSource.close()});eventSource.addEventListener('error',(event)=>{const message=event.data?JSON.parse(event.data).message:'서버와의 연결이 끊어졌습니다.';setStatus(message||'번역 중 오류가 발생했습니다.',true);startButton.disabled=false;eventSource.close()})}catch(error){setStatus(error.message,true);startButton.disabled=false}});
+// API 키는 입력란(메모리)에만 머물며 localStorage/sessionStorage/쿠키에 저장하지 않습니다.
+function setKeyInvalid(invalid) {
+  if (invalid) {
+    apiKeyInput.setAttribute('aria-invalid', 'true');
+    apiKeyInput.focus();
+  } else {
+    apiKeyInput.removeAttribute('aria-invalid');
+  }
+}
+apiKeyInput.addEventListener('input', () => setKeyInvalid(false));
+toggleKeyButton.addEventListener('click', () => {
+  const show = apiKeyInput.type === 'password';
+  apiKeyInput.type = show ? 'text' : 'password';
+  toggleKeyButton.textContent = show ? '숨기기' : '보기';
+  toggleKeyButton.setAttribute('aria-pressed', String(show));
+  apiKeyInput.focus();
+});
+
+form.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const apiKey = apiKeyInput.value.trim();
+  if (!apiKey) {
+    setKeyInvalid(true);
+    setStatus('OpenAI API 키를 입력해 주세요. 키가 없으면 번역을 시작할 수 없습니다.', true);
+    return;
+  }
+  if (!pdfInput.files.length) {
+    pdfInput.focus();
+    setStatus('PDF 파일을 선택해 주세요.', true);
+    return;
+  }
+  resetView();
+  startButton.disabled = true;
+  setStatus('PDF에서 텍스트를 추출하는 중입니다...');
+  // 키는 URL이 아닌 POST 본문(multipart)으로만 전송합니다.
+  const formData = new FormData(form);
+  formData.set('api_key', apiKey);
+  try {
+    const response = await fetch('/start', { method: 'POST', body: formData });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      if (data.field === 'api_key') setKeyInvalid(true);
+      throw new Error(data.error || '작업을 시작하지 못했습니다.');
+    }
+    sourceText.value = data.extracted_text;
+    setStatus('번역을 진행하고 있습니다...');
+    eventSource = new EventSource(`/events/${data.job_id}`);
+    eventSource.addEventListener('progress', (event) => {
+      const payload = JSON.parse(event.data);
+      translatedText.value += payload.text;
+      translatedText.scrollTop = translatedText.scrollHeight;
+      setProgress(payload.progress);
+      setStatus(`번역 중... ${payload.progress}%`);
+    });
+    eventSource.addEventListener('complete', () => {
+      setProgress(100);
+      setStatus('번역이 완료되었습니다.');
+      downloadButton.href = `/download/${data.job_id}`;
+      downloadButton.classList.remove('disabled');
+      downloadButton.removeAttribute('aria-disabled');
+      startButton.disabled = false;
+      eventSource.close();
+    });
+    eventSource.addEventListener('error', (event) => {
+      let message = '서버와의 연결이 끊어졌습니다.';
+      if (event.data) {
+        const payload = JSON.parse(event.data);
+        message = payload.message || '번역 중 오류가 발생했습니다.';
+        if (payload.code === 'invalid_api_key') setKeyInvalid(true);
+      }
+      setStatus(message, true);
+      startButton.disabled = false;
+      eventSource.close();
+    });
+  } catch (error) {
+    setStatus(error.message, true);
+    startButton.disabled = false;
+  }
+});
 </script></body></html>
